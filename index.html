@@ -1,0 +1,84 @@
+ yet.":"No items match filters."}</div>{items.length===0&&<button className="btn btn-gold" style={{marginTop:12}} onClick={()=>setModal("add")}>+ Add First Item</button>}</div>:
+      <div><table><thead><tr><th>#</th><th>Type</th><th>Title</th><th>Project</th><th>Status</th><th>Ball in Court</th><th>Assigned</th><th>Due</th><th>Aging</th><th></th></tr></thead>
+      <tbody>{filtered.map(item=><React.Fragment key={item.id}>
+        <tr className={isOverdue(item)?"overdue-row":""} style={{cursor:"pointer"}} onClick={()=>setExpanded(expanded===item.id?null:item.id)}>
+          <td><span className="mono">{item.Number||"—"}</span></td>
+          <td><span style={{background:item.ItemType==="RFI"?"rgba(21,56,108,0.4)":"rgba(200,168,75,0.15)",color:item.ItemType==="RFI"?"#7eb3e8":"var(--gold-lt)",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif"}}>{item.ItemType||"—"}</span></td>
+          <td><div style={{fontWeight:600,color:"var(--white)"}}>{item.Title}</div>{item.Subject&&item.Subject!==item.Title&&<div style={{color:"var(--gray)",fontSize:11,marginTop:1}}>{item.Subject}</div>}</td>
+          <td style={{color:"var(--gray-lt)",fontSize:12}}>{item.Project||"—"}</td>
+          <td><Badge status={item.Status}/></td>
+          <td><BIC val={item.BallInCourt}/></td>
+          <td style={{color:"var(--gray-lt)",fontSize:12}}>{item.AssignedTo||"—"}</td>
+          <td style={{color:"var(--gray)",fontSize:12}}>{fmtDate(item.DueDate)}</td>
+          <td><Aging date={item.DueDate} status={item.Status}/></td>
+          <td><button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();setSel(item);setModal("edit");}}>✏</button></td>
+        </tr>
+        {expanded===item.id&&<tr><td colSpan="10" style={{padding:0,background:"transparent"}}>
+          <div className="detail-panel">
+            <div className="detail-grid">
+              <div><div className="detail-label">Number</div><div className="detail-val">{item.Number||"—"}</div></div>
+              <div><div className="detail-label">Project</div><div className="detail-val">{item.Project||"—"}</div></div>
+              <div><div className="detail-label">Type</div><div className="detail-val">{item.ItemType||"—"}</div></div>
+              <div><div className="detail-label">Status</div><div className="detail-val"><Badge status={item.Status}/></div></div>
+              <div><div className="detail-label">Ball in Court</div><div className="detail-val"><BIC val={item.BallInCourt}/></div></div>
+              <div><div className="detail-label">Assigned To</div><div className="detail-val">{item.AssignedTo||"—"}</div></div>
+              <div><div className="detail-label">Due Date</div><div className="detail-val">{fmtDate(item.DueDate)}</div></div>
+              <div><div className="detail-label">Response Date</div><div className="detail-val">{fmtDate(item.ResponseDate)}</div></div>
+              <div><div className="detail-label">Aging</div><div className="detail-val"><Aging date={item.DueDate} status={item.Status}/></div></div>
+            </div>
+            {item.Description&&<div style={{marginBottom:12}}><div className="detail-label">Description</div><div style={{color:"var(--gray-lt)",fontSize:13,lineHeight:1.5}}>{item.Description}</div></div>}
+            {item.EvidenceLink&&<div style={{marginBottom:12}}><div className="detail-label">Evidence</div><a href={item.EvidenceLink} target="_blank" rel="noreferrer" style={{color:"var(--gold)",fontSize:13}}>📎 {item.EvidenceLink}</a></div>}
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <button className="btn btn-gold btn-sm" onClick={()=>{setSel(item);setModal("edit");}}>✏ Edit All Fields</button>
+              {!["Closed","Approved"].includes(item.Status)&&<button className="btn btn-primary btn-sm" onClick={async()=>{try{await onEdit(item.id,{Status:"Approved"});flash("Approved ✓");}catch(e){alert(e.message);}}}>✓ Approve</button>}
+              {!["Closed"].includes(item.Status)&&<button className="btn btn-ghost btn-sm" onClick={async()=>{try{await onEdit(item.id,{Status:"Closed"});flash("Closed ✓");}catch(e){alert(e.message);}}}>Archive</button>}
+            </div>
+          </div>
+        </td></tr>}
+      </React.Fragment>)}</tbody></table></div>}
+    </div>
+    {modal==="add"&&<AddModal projects={projects} onClose={()=>setModal(null)} onSave={async f=>{await onAdd(f);flash("Added ✓");}}/>}
+    {modal==="edit"&&sel&&<EditModal item={sel} projects={projects} onClose={()=>setModal(null)} onSave={async(id,f)=>{await onEdit(id,f);flash("Updated ✓");}}/>}
+  </div>);
+}
+
+function ComingSoon({title,listName}){return(<div><div className="section-head"><div className="section-title">{title.split(" ")[0]} <span>{title.split(" ").slice(1).join(" ")}</span></div></div><div className="coming-soon"><div className="coming-soon-icon">🔜</div><div className="coming-soon-title">SharePoint List Required</div><div className="coming-soon-sub">Create <code>{listName}</code> on your DEI site to enable this view.</div><a href={CONFIG.siteUrl} target="_blank" rel="noreferrer" className="btn btn-gold">Open SharePoint →</a></div></div>);}
+
+function Login({onLogin}){const[loading,setLoading]=useState(false);const[error,setError]=useState(null);
+  const login=async()=>{setLoading(true);setError(null);try{await msalInstance.initialize();const r=await msalInstance.loginPopup({scopes:SCOPES});onLogin(r.account);}catch(e){setError(e.message);setLoading(false);}};
+  return(<div className="login-screen"><div className="login-card"><div><div className="login-wordmark">DISTRIBUTED <span>ENERGY</span> INFRASTRUCTURE</div><div className="login-tagline">Building a Connected Future</div></div><div className="login-divider"/><div className="login-title">Project Truth</div><div className="login-sub">Sign in with your DEI Microsoft account to access the PMO control plane.</div>{error&&<div className="banner-error" style={{marginBottom:16,textAlign:"left"}}>⚠ {error}</div>}<button className="ms-btn" onClick={login} disabled={loading}><svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>{loading?"Signing in...":"Sign in with Microsoft"}</button><div className="login-footer">Restricted to DEI accounts only</div></div></div>);}
+
+function App(){
+  const[user,setUser]=useState(null);const[view,setView]=useState("overview");const[ready,setReady]=useState(false);
+  const[items,setItems]=useState([]);const[loading,setLoading]=useState(true);const[error,setError]=useState(null);
+  useEffect(()=>{msalInstance.initialize().then(()=>{const a=msalInstance.getAllAccounts();if(a.length)setUser(a[0]);setReady(true);});},[]);
+  const load=useCallback(async()=>{setLoading(true);setError(null);try{setItems(await getItems(CONFIG.lists.rfi));}catch(e){setError(e.message);}finally{setLoading(false);}},[]);
+  useEffect(()=>{if(user)load();},[user,load]);
+  const handleAdd=async f=>{await addItem(CONFIG.lists.rfi,f);load();};
+  const handleEdit=async(id,f)=>{await editItem(CONFIG.lists.rfi,id,f);load();};
+  if(!ready)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><div className="spinner"/></div>;
+  if(!user)return<Login onLogin={setUser}/>;
+  const overdue=items.filter(i=>isOverdue(i));
+  const nav=[{section:"PROJECT"},{id:"overview",icon:"🏠",label:"Overview"},{section:"LOGS"},{id:"engineering",icon:"⚙",label:"Engineering Log",badge:overdue.length},{id:"owner",icon:"👤",label:"Owner Log"},{id:"permits",icon:"🏛",label:"Permits"},{id:"closeout",icon:"📋",label:"Closeout"}];
+  const titles={overview:"Overview",engineering:"Engineering Log",owner:"Owner Log",permits:"Permit Matrix",closeout:"Closeout"};
+  return(<div className="app">
+    <div className="sidebar"><div className="sidebar-logo"><div className="logo-wordmark">DISTRIBUTED <span>ENERGY</span> INFRA</div><div className="logo-tagline">Project Truth — PMO</div><div className="logo-divider"/></div>
+      <div className="nav">{nav.map((item,i)=>{if(item.section)return<div key={i} className="nav-section">{item.section}</div>;return<div key={item.id} className={`nav-item ${view===item.id?"active":""}`} onClick={()=>setView(item.id)}><span className="nav-icon">{item.icon}</span><span>{item.label}</span>{item.badge>0&&<span className="nav-badge">{item.badge}</span>}</div>;})}</div>
+      <div className="sidebar-user"><div className="user-name">{user.name||"User"}</div><div className="user-org">{user.username}</div><button className="signout-btn" onClick={()=>{msalInstance.logoutPopup();setUser(null);}}>Sign out</button></div>
+    </div>
+    <div className="main">
+      <div className="topbar"><div className="topbar-title">{titles[view]}</div><div className="live-dot">SharePoint Connected</div></div>
+      <div className="content">
+        {view==="overview"&&<Overview user={user} items={items} loading={loading}/>}
+        {view==="engineering"&&<Engineering items={items} loading={loading} error={error} onReload={load} onAdd={handleAdd} onEdit={handleEdit}/>}
+        {view==="owner"&&<ComingSoon title="Owner Log" listName="DEI-BOM-Procurement"/>}
+        {view==="permits"&&<ComingSoon title="Permit Matrix" listName="DEI-Permit-Matrix"/>}
+        {view==="closeout"&&<ComingSoon title="Closeout Tracker" listName="DEI-Closeout-Items"/>}
+      </div>
+    </div>
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
