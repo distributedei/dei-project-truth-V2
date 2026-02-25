@@ -49,7 +49,7 @@
 const{useState,useEffect,useCallback,useMemo}=React;
 const CONFIG={clientId:"613928f8-0497-47ea-bb0f-c1725a1f156a",tenantId:"ec357a32-5b85-438d-a765-ae33c8eb13b7",siteId:"8103997e-0688-4832-a5b4-bf18de7f96f5",siteUrl:"https://distributedei.sharepoint.com",lists:{rfi:"38fd99d2-dad5-41d8-a898-4f5e425ad340"}};
 const msalInstance=new msal.PublicClientApplication({auth:{clientId:CONFIG.clientId,authority:"https://login.microsoftonline.com/"+CONFIG.tenantId,redirectUri:window.location.origin},cache:{cacheLocation:"sessionStorage"}});
-const SCOPES=["Sites.Selected","Files.Read.All","User.Read"];
+const SCOPES=["Sites.Selected","Files.Read.All","User.Read","User.ReadBasic.All","Chat.Create","ChatMessage.Send"];
 async function getToken(){const a=msalInstance.getAllAccounts();if(!a.length)throw new Error("Not signed in");try{return(await msalInstance.acquireTokenSilent({scopes:SCOPES,account:a[0]})).accessToken;}catch(e){return(await msalInstance.acquireTokenPopup({scopes:SCOPES})).accessToken;}}
 async function graph(m,p,b){const t=await getToken();const r=await fetch("https://graph.microsoft.com/v1.0"+p,{method:m||"GET",headers:{Authorization:"Bearer "+t,...(b?{"Content-Type":"application/json"}:{})},body:b?JSON.stringify(b):undefined});if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Error "+r.status);}return r.status===204?null:r.json();}
 const SITE="/sites/"+CONFIG.siteId;
@@ -59,6 +59,77 @@ function toSP(f){const o={};for(const[k,v] of Object.entries(f)){if(v!==""&&v!=n
 async function getItems(l){const d=await graph("GET",SITE+"/lists/"+l+"/items?expand=fields&$top=999");return(d.value||[]).map(i=>({id:i.id,...fromSP(i.fields)}));}
 async function addItem(l,f){return graph("POST",SITE+"/lists/"+l+"/items",{fields:toSP(f)});}
 async function editItem(l,id,f){return graph("PATCH",SITE+"/lists/"+l+"/items/"+id+"/fields",toSP(f));}
+
+// Teams Notification System
+function nameToEmail(name){
+  if(!name||name==="Unassigned")return null;
+  var parts=name.trim().split(/\s+/);
+  if(parts.length<2)return null;
+  var first=parts[0].toLowerCase();
+  var last=parts[parts.length-1].toLowerCase();
+  return first.charAt(0)+last+"@distributedei.com";
+}
+
+async function findUserId(email){
+  try{
+    var r=await graph("GET","/users/"+encodeURIComponent(email)+"?$select=id,displayName");
+    return r.id;
+  }catch(e){console.warn("User not found: "+email,e);return null;}
+}
+
+async function sendTeamsMessage(assignedTo,subject,body,changedBy){
+  var email=nameToEmail(assignedTo);
+  if(!email)return;
+  var userId=await findUserId(email);
+  if(!userId)return;
+  // Get current user ID
+  var me=await graph("GET","/me?$select=id");
+  if(me.id===userId)return; // Don't notify yourself
+  // Create 1:1 chat
+  var chat=await graph("POST","/chats",{
+    chatType:"oneOnOne",
+    members:[
+      {"@odata.type":"#microsoft.graph.aadUserConversationMember",roles:["owner"],"user@odata.bind":"https://graph.microsoft.com/v1.0/users('"+me.id+"')"},
+      {"@odata.type":"#microsoft.graph.aadUserConversationMember",roles:["owner"],"user@odata.bind":"https://graph.microsoft.com/v1.0/users('"+userId+"')"}
+    ]
+  });
+  // Send message
+  await graph("POST","/chats/"+chat.id+"/messages",{
+    body:{contentType:"html",content:"<b>📋 Project Truth Update</b><br><br><b>"+subject+"</b><br>"+body+"<br><br><i>Changed by "+changedBy+"</i>"}
+  });
+}
+
+async function notifyOnChange(item,changes,changedBy){
+  try{
+    var assignee=changes.AssignedTo||item.AssignedTo;
+    if(!assignee)return;
+    var subject=item.Title||item.Subject||"Item #"+item.Number;
+    var project=changes.Project||item.Project||"";
+    var lines=[];
+    if(project)lines.push("Project: "+project);
+    if(changes.Status)lines.push("Status → <b>"+changes.Status+"</b>");
+    if(changes.BallInCourt)lines.push("Ball in Court → <b>"+changes.BallInCourt+"</b>");
+    if(changes.AssignedTo)lines.push("Assigned to → <b>"+changes.AssignedTo+"</b>");
+    if(changes.DueDate)lines.push("Due Date → <b>"+changes.DueDate+"</b>");
+    if(changes.Description)lines.push("Description updated");
+    var body=lines.join("<br>");
+    await sendTeamsMessage(assignee,subject,body,changedBy);
+  }catch(e){console.warn("Teams notification failed:",e);}
+}
+
+async function notifyOnAdd(fields,changedBy){
+  try{
+    if(!fields.AssignedTo)return;
+    var subject=fields.Title||fields.Subject||"New Item";
+    var lines=["<b>New item created</b>"];
+    if(fields.Project)lines.push("Project: "+fields.Project);
+    if(fields.ItemType)lines.push("Type: "+fields.ItemType);
+    if(fields.Status)lines.push("Status: "+fields.Status);
+    if(fields.DueDate)lines.push("Due: "+fields.DueDate);
+    if(fields.Description)lines.push("Description: "+fields.Description);
+    await sendTeamsMessage(fields.AssignedTo,subject,lines.join("<br>"),changedBy);
+  }catch(e){console.warn("Teams notification failed:",e);}
+}
 
 const STS=["Draft","Submitted","In Review","Returned - Revise","Approved","Rejected","Closed"];
 const BICS=["Engineering","Construction","PM","Owner","Vendor","AHJ","Utility"];
@@ -271,8 +342,13 @@ function App(){
   useEffect(function(){msalInstance.initialize().then(function(){var a=msalInstance.getAllAccounts();if(a.length)setUser(a[0]);setReady(true);});},[]);
   var load=useCallback(async function(){setLoading(true);setError(null);try{setItems(await getItems(CONFIG.lists.rfi));}catch(e){setError(e.message);}finally{setLoading(false);}},[]);
   useEffect(function(){if(user)load();},[user,load]);
-  var handleAdd=async function(f){await addItem(CONFIG.lists.rfi,f);load();};
-  var handleEdit=async function(id,f){await editItem(CONFIG.lists.rfi,id,f);load();};
+  var handleAdd=async function(f){await addItem(CONFIG.lists.rfi,f);notifyOnAdd(f,user.name||user.username);load();};
+  var handleEdit=async function(id,f){
+    var oldItem=items.find(function(i){return i.id===id;});
+    await editItem(CONFIG.lists.rfi,id,f);
+    if(oldItem)notifyOnChange(oldItem,f,user.name||user.username);
+    load();
+  };
   if(!ready)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><div className="spinner"/></div>;
   if(!user)return <Login onLogin={setUser}/>;
   var overdue=items.filter(isOverdue);
