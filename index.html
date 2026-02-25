@@ -40,6 +40,7 @@
     .cs{background:#fff;border:1px dashed rgba(119,157,54,0.3);border-radius:10px;padding:48px;text-align:center;}
     .login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f5f7fa;}.login-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:48px 40px;text-align:center;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.08);}.login-wordmark{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;letter-spacing:1px;color:#375673;}.login-wordmark span{color:#779d36;}.login-tagline{font-size:11px;color:#8a9baa;text-transform:uppercase;letter-spacing:2px;margin-top:6px;}.login-divider{height:1px;background:linear-gradient(90deg,transparent,#779d36,transparent);margin:24px 0;}.ms-btn{background:#0078d4;border:none;color:#fff;padding:13px 28px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Barlow',sans-serif;display:flex;align-items:center;gap:10px;margin:0 auto;}.ms-btn:hover{background:#106ebe;}
     code{background:rgba(200,168,75,0.15);color:var(--gold-lt);padding:2px 8px;border-radius:4px;font-size:13px;}
+    .cmt-box{border-top:1px solid #e2e8f0;margin-top:16px;padding-top:16px;}.cmt-title{font-size:12px;font-weight:700;color:#375673;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;}.cmt-list{max-height:200px;overflow-y:auto;margin-bottom:10px;}.cmt-item{padding:8px 12px;background:#f8fafb;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px;font-size:12px;}.cmt-meta{color:#8a9baa;font-size:10px;margin-bottom:3px;font-weight:600;}.cmt-text{color:#4a5568;line-height:1.4;}.cmt-input{display:flex;gap:8px;}.cmt-input input{flex:1;background:#f8fafb;border:1px solid #e2e8f0;color:#1a1a1a;padding:8px 12px;border-radius:5px;font-size:13px;font-family:'Barlow',sans-serif;}.cmt-input input:focus{outline:none;border-color:#779d36;}.cmt-send{background:#779d36;color:#fff;border:none;padding:8px 16px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;font-family:'Barlow',sans-serif;}.cmt-send:hover{background:#5f8228;}.cmt-send:disabled{opacity:0.5;cursor:not-allowed;}
     ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:#f5f7fa;}::-webkit-scrollbar-thumb{background:#c4d0dc;border-radius:3px;}
   </style>
 </head>
@@ -144,6 +145,55 @@ function isOverdue(i){if(["Closed","Approved"].includes(i.Status))return false;v
 function Aging({date,status}){if(["Closed","Approved"].includes(status))return React.createElement("span",{style:{color:"var(--green)",fontSize:12}},"\u25CF Done");var d=agingDays(date);if(d===null)return React.createElement("span",{style:{color:"#8a9baa"}},"\u2014");if(d<=0)return React.createElement("span",{style:{color:"var(--green)",fontSize:12}},"\u25CF On Track");if(d<7)return React.createElement("span",{style:{color:"var(--amber)",fontSize:12}},"\u25B2 "+d+"d");return React.createElement("span",{style:{color:"var(--red)",fontSize:12,fontWeight:700}},"\u26A0 "+d+"d");}
 function fmtDate(d){if(!d)return"\u2014";return new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});}
 
+function CommentBox({item,user,onEdit}){
+  const[text,setText]=useState("");
+  const[sending,setSending]=useState(false);
+  var existing=item.Description||"";
+  // Parse comments from Description field - format: [date|user] message\n
+  var comments=[];
+  var lines=existing.split("\n");
+  var descLines=[];
+  lines.forEach(function(line){
+    var m=line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\|([^\]]+)\] (.+)$/);
+    if(m){comments.push({date:m[1],who:m[2],msg:m[3]});}
+    else if(line.trim()&&comments.length===0){descLines.push(line);}
+  });
+  var desc=descLines.join("\n").trim();
+
+  var send=async function(){
+    if(!text.trim())return;
+    setSending(true);
+    try{
+      var now=new Date();
+      var ts=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0")+" "+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+      var who=user.name||user.username||"Unknown";
+      var newComment="["+ts+"|"+who+"] "+text.trim();
+      var updatedDesc=existing?(existing+"\n"+newComment):newComment;
+      await onEdit(item.id,{Description:updatedDesc});
+      // Send Teams notification to assigned person
+      var assignee=item.AssignedTo;
+      if(assignee){
+        try{await sendTeamsMessage(assignee,item.Title||"Item Update","💬 <b>"+who+"</b> commented:<br><i>\""+text.trim()+"\"</i><br><br>Project: "+(item.Project||"—"),who);}catch(e){console.warn("Teams notify failed:",e);}
+      }
+      setText("");
+    }catch(e){alert("Error: "+e.message);}
+    finally{setSending(false);}
+  };
+
+  return(<div className="cmt-box">
+    <div className="cmt-title">💬 Comments & Activity</div>
+    {desc&&<div style={{padding:"8px 12px",background:"#f0f4f8",borderRadius:6,marginBottom:10,fontSize:12,color:"#4a5568"}}><div style={{fontWeight:600,fontSize:10,color:"#8a9baa",marginBottom:2}}>ORIGINAL DESCRIPTION</div>{desc}</div>}
+    {comments.length>0&&<div className="cmt-list">
+      {comments.map(function(c,i){return <div key={i} className="cmt-item"><div className="cmt-meta">{c.who} · {c.date}</div><div className="cmt-text">{c.msg}</div></div>;})}
+    </div>}
+    {comments.length===0&&!desc&&<div style={{color:"#8a9baa",fontSize:12,marginBottom:10}}>No comments yet. Add the first one below.</div>}
+    <div className="cmt-input">
+      <input value={text} onChange={function(e){setText(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter"&&!sending)send();}} placeholder={"Comment as "+(user.name||user.username||"")+"... (sends Teams notification)"}/>
+      <button className="cmt-send" disabled={sending||!text.trim()} onClick={send}>{sending?"Sending...":"Send"}</button>
+    </div>
+  </div>);
+}
+
 function Modal({title,onClose,children}){
   return(<div className="mo" onClick={function(e){if(e.target===e.currentTarget)onClose();}}>
     <div className="ml">
@@ -230,7 +280,7 @@ function Overview({user,items,loading}){
   </div>);
 }
 
-function Engineering({items,loading,error,onReload,onAdd,onEdit}){
+function Engineering({items,loading,error,onReload,onAdd,onEdit,user}){
   const[projF,setProjF]=useState("all");const[personF,setPersonF]=useState("all");const[typeF,setTypeF]=useState("all");const[statF,setStatF]=useState("all");
   const[modal,setModal]=useState(null);const[sel,setSel]=useState(null);const[expanded,setExpanded]=useState(null);const[success,setSuccess]=useState(null);
   var projects=useMemo(function(){return[...new Set(items.map(function(i){return i.Project;}).filter(Boolean))].sort();},[items]);
@@ -305,6 +355,7 @@ function Engineering({items,loading,error,onReload,onAdd,onEdit}){
               {!["Closed","Approved"].includes(item.Status)&&<button className="btn btn-primary btn-sm" onClick={async function(){try{await onEdit(item.id,{Status:"Approved"});flash("Approved ✓");}catch(e){alert(e.message);}}}>✓ Approve</button>}
               {item.Status!=="Closed"&&<button className="btn btn-ghost btn-sm" onClick={async function(){try{await onEdit(item.id,{Status:"Closed"});flash("Closed ✓");}catch(e){alert(e.message);}}}>Archive</button>}
             </div>
+            <CommentBox item={item} user={user} onEdit={onEdit}/>
           </div>
         </td></tr>}
       </React.Fragment>;})}</tbody></table></div>}
@@ -363,7 +414,7 @@ function App(){
       <div className="topbar"><div className="topbar-title">{titles[view]}</div><div className="live-dot">SharePoint Connected</div></div>
       <div className="content">
         {view==="overview"&&<Overview user={user} items={items} loading={loading}/>}
-        {view==="engineering"&&<Engineering items={items} loading={loading} error={error} onReload={load} onAdd={handleAdd} onEdit={handleEdit}/>}
+        {view==="engineering"&&<Engineering items={items} loading={loading} error={error} onReload={load} onAdd={handleAdd} onEdit={handleEdit} user={user}/>}
         {view==="owner"&&<ComingSoon title="Owner Log" listName="DEI-BOM-Procurement"/>}
         {view==="permits"&&<ComingSoon title="Permit Matrix" listName="DEI-Permit-Matrix"/>}
         {view==="closeout"&&<ComingSoon title="Closeout Tracker" listName="DEI-Closeout-Items"/>}
